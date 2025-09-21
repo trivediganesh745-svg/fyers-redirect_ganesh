@@ -19,7 +19,7 @@ REDIRECT_URI = os.environ.get("FYERS_REDIRECT_URI")
 ACCESS_TOKEN = os.environ.get("FYERS_ACCESS_TOKEN")
 
 # Frontend URL - **IMPORTANT: ADD THIS ENVIRONMENT VARIABLE**
-FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8000") # Default for local testing
+FRONTEND_URL = os.environ.get(https://github.com/trivediganesh745-svg/fyers-redirect_ganesh) # Default for local testing
 
 if not all([CLIENT_ID, SECRET_KEY, REDIRECT_URI]):
     print("WARNING: Fyers API credentials are not fully set. Some functionalities may not work.")
