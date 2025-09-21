@@ -2,33 +2,34 @@ import os
 import json
 from datetime import datetime, timedelta
 from flask import Flask, request, redirect, session, jsonify, render_template
-# Changed to fyers_apiv3 as per your snippets
-from fyers_apiv3 import fyersModel, accessToken 
-# You'll need this for WebSocket if you use it in the proxy
+
+# Corrected Import: FyersModel and SessionModel are now typically found within fyers_apiv3.fyersModel
+from fyers_apiv3.fyersModel import FyersModel, SessionModel 
 from fyers_apiv3.FyersWebsocket import data_ws 
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24) # Set a secret key for session management
 
-# Fyers API Configuration (replace with your actual credentials)
-CLIENT_ID = os.environ.get("FYERS_CLIENT_ID", "YOUR_CLIENT_ID-100") # Use environment variables for security
+# Fyers API Configuration (replace with your actual credentials or set as environment variables)
+# IMPORTANT: Use environment variables for production deployments like Render!
+CLIENT_ID = os.environ.get("FYERS_CLIENT_ID", "YOUR_CLIENT_ID-100") 
 CLIENT_ID_WITHOUT_100 = CLIENT_ID.split("-")[0]
 SECRET_KEY = os.environ.get("FYERS_SECRET_KEY", "YOUR_SECRET_KEY")
-REDIRECT_URI = "http://127.0.0.1:5000/fyers-auth-callback" # Adjust if your proxy runs on a different port/domain
+# Ensure this REDIRECT_URI matches what you registered with Fyers for your app
+# For Render, it will be your_app_url/fyers-auth-callback
+REDIRECT_URI = os.environ.get("FYERS_REDIRECT_URI", "http://127.0.0.1:5000/fyers-auth-callback") 
 
 # Global variables to store token and FyersModel instance
-# It's better to manage these in a more robust way for production,
-# e.g., persistent storage, but globals are fine for a simple proxy example.
 ACCESS_TOKEN = None
 REFRESH_TOKEN = None
-fyers_instance = None # Renamed to avoid conflict with the module name
+fyers_instance = None 
 
 # --- Fyers API Initialization Helper ---
 def initialize_fyers_model(token):
-    global fyers_instance # Declare fyers_instance as global here
+    global fyers_instance 
     if token:
-        # Use fyersModel from fyers_apiv3
-        fyers_instance = fyersModel.FyersModel(token=token, is_async=False, client_id=CLIENT_ID, log_path="")
+        # Use FyersModel from fyers_apiv3.fyersModel
+        fyers_instance = FyersModel(token=token, is_async=False, client_id=CLIENT_ID, log_path="")
         print("FyersModel initialized with access token.")
     else:
         print("FyersModel could not be initialized: No access token provided.")
@@ -51,7 +52,8 @@ def index():
 
 @app.route('/login')
 def login():
-    session_builder = accessToken.SessionModel(
+    # Use SessionModel from fyers_apiv3.fyersModel
+    session_builder = SessionModel(
         client_id=CLIENT_ID,
         secret_key=SECRET_KEY,
         redirect_uri=REDIRECT_URI,
@@ -67,7 +69,8 @@ def fyers_auth_callback():
     if not auth_code:
         return jsonify({"error": "Authorization code not found in callback."}), 400
 
-    session_builder = accessToken.SessionModel(
+    # Use SessionModel from fyers_apiv3.fyersModel
+    session_builder = SessionModel(
         client_id=CLIENT_ID,
         secret_key=SECRET_KEY,
         redirect_uri=REDIRECT_URI,
@@ -79,18 +82,18 @@ def fyers_auth_callback():
     try:
         response = session_builder.generate_token()
         
-        global ACCESS_TOKEN # Declare ACCESS_TOKEN as global here
-        global REFRESH_TOKEN # Declare REFRESH_TOKEN as global here
+        global ACCESS_TOKEN 
+        global REFRESH_TOKEN 
         
         ACCESS_TOKEN = response["access_token"]
         REFRESH_TOKEN = response.get("refresh_token") # Refresh token might not always be present
         
-        initialize_fyers_model(ACCESS_TOKEN) # This will handle 'global fyers_instance'
+        initialize_fyers_model(ACCESS_TOKEN) 
         
         print(f"Access Token: {ACCESS_TOKEN}")
         print(f"Refresh Token: {REFRESH_TOKEN}")
         
-        return redirect('/') # Redirect to dashboard or home page
+        return redirect('/') 
     except Exception as e:
         print(f"Error during token generation: {e}")
         return jsonify({"error": f"Failed to generate access token: {str(e)}"}), 500
@@ -157,7 +160,7 @@ def get_history():
         if not data or not all(k in data for k in ["symbol", "resolution", "range_from", "range_to"]):
             return jsonify({"error": "Missing required parameters for history API. Need symbol, resolution, range_from, range_to."}), 400
         
-        history_data = fyers_api.history(data=data) # Pass data as keyword argument
+        history_data = fyers_api.history(data=data) 
         return jsonify(history_data)
     except Exception as e:
         ACCESS_TOKEN = None
@@ -177,7 +180,7 @@ def place_single_order():
         if not order_data:
             return jsonify({"error": "No order data provided."}), 400
         
-        response = fyers_api.place_order(data=order_data) # Pass data as keyword argument
+        response = fyers_api.place_order(data=order_data)
         return jsonify(response)
     except Exception as e:
         ACCESS_TOKEN = None
@@ -193,7 +196,6 @@ def get_orderbook():
     if not fyers_api:
         return jsonify({"error": "Fyers API not initialized. Please authenticate first."}), 401
     try:
-        # Check for optional orderId from query parameter
         order_id = request.args.get('orderId')
         data = {"id": order_id} if order_id else {}
         response = fyers_api.orderbook(data=data)
@@ -216,10 +218,6 @@ def get_orders_by_tag():
         if not order_tag:
             return jsonify({"error": "Missing 'order_tag' parameter."}), 400
         
-        # The Fyers API v3 `orderbook` method itself has a `data` parameter
-        # which can accept an 'orderTag' as per your curl example.
-        # This assumes your fyersModel.orderbook implementation supports it.
-        # If not, you might need to filter client-side or check Fyers docs.
         data = {"orderTag": order_tag}
         response = fyers_api.orderbook(data=data) 
         return jsonify(response)
@@ -500,7 +498,6 @@ def logout_fyers():
     global fyers_instance
     fyers_api = _get_fyers_instance()
     if not fyers_api:
-        # If fyers_api is not initialized, consider it already logged out or no session
         ACCESS_TOKEN = None
         fyers_instance = None
         return jsonify({"s": "ok", "code": 200, "message": "Already logged out or no active session."})
@@ -511,7 +508,6 @@ def logout_fyers():
         return jsonify(response)
     except Exception as e:
         print(f"Error during logout: {e}")
-        # Even if logout fails on Fyers side, clear local session
         ACCESS_TOKEN = None
         fyers_instance = None
         return jsonify({"error": f"Failed to logout: {str(e)}"}), 500
@@ -520,21 +516,15 @@ def logout_fyers():
 # --- Placeholder for Gemini API Integration ---
 @app.route('/api/gemini/analyze', methods=['POST'])
 def analyze_with_gemini():
-    # This is where you would integrate with the Gemini API.
-    # 1. Receive Fyers data from your frontend (e.g., historical data, positions, etc.)
     fyers_data = request.json
     if not fyers_data:
         return jsonify({"error": "No data provided for Gemini analysis."}), 400
 
-    # 2. Format the data for Gemini (e.g., create a prompt)
     prompt = "Analyze the following Fyers trading data and provide insights: " + json.dumps(fyers_data)
 
-    # 3. Call the Gemini API
-    #    You'll need to install google-generativeai: pip install google-generativeai
-    #    And set up your API key.
-    #
+    # Implement Gemini API integration here
     # import google.generativeai as genai
-    # genai.configure(api_key="YOUR_GEMINI_API_KEY")
+    # genai.configure(api_key=os.environ.get("GEMINI_API_KEY")) # Use environment variable
     # model = genai.GenerativeModel('gemini-pro')
     # try:
     #     gemini_response = model.generate_content(prompt)
@@ -544,14 +534,10 @@ def analyze_with_gemini():
     #     print(f"Error calling Gemini API: {e}")
     #     return jsonify({"error": f"Failed to get analysis from Gemini: {str(e)}"}), 500
 
-    # Placeholder response
     return jsonify({"message": "Gemini analysis endpoint - placeholder. Integrate Gemini API here.", "received_data": fyers_data})
 
 
 # --- Placeholder for Fyers WebSocket Integration ---
-# These functions will handle WebSocket events.
-# They would typically process real-time data and either store it,
-# or push it to connected clients (e.g., via another WebSocket for the frontend).
 def onopen(ws):
     print("WebSocket connection opened.")
     # Subscribe to symbols here if you want immediate data
@@ -576,9 +562,6 @@ def start_fyers_websocket():
 
     print("Attempting to start Fyers WebSocket...")
     try:
-        # Create FyersDataSocket instance
-        # The access_token format is usually "APP_ID:ACCESS_TOKEN"
-        # Ensure your ACCESS_TOKEN is formatted correctly.
         ws_access_token = f"{CLIENT_ID_WITHOUT_100}:{ACCESS_TOKEN}"
         
         fyers_ws = data_ws.FyersDataSocket(
@@ -594,11 +577,6 @@ def start_fyers_websocket():
             reconnect_retry=10
         )
         
-        # Start the WebSocket connection in a non-blocking way
-        # This will usually run in a separate thread or process
-        # For a simple Flask app, you might consider using a library like Flask-SocketIO
-        # or running this in a separate thread.
-        # For now, just call connect() - it might block if not handled carefully.
         fyers_ws.connect()
         print("Fyers WebSocket connected.")
 
@@ -608,11 +586,4 @@ def start_fyers_websocket():
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # You might want to uncomment this to automatically start the WebSocket
-    # after the server runs and an ACCESS_TOKEN is available.
-    # However, integrating WebSockets properly with Flask requires more advanced patterns
-    # (e.g., using Flask-SocketIO or a separate thread/process for the WebSocket client)
-    # to prevent blocking the main Flask thread.
-    # For now, it's just a callable function.
-    # start_fyers_websocket() 
-    app.run(debug=True) # debug=True is good for development, set to False for production
+    app.run(debug=True)
