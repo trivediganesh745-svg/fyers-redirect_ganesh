@@ -4,3 +4,4 @@ python-dotenv
 gunicorn
 Flask-Cors
 google-generativeai # Add this for Gemini
+setuptools
