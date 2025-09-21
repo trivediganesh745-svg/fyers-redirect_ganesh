@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fyers Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f4f4f4; color: #333; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 800px; margin: auto; }
+        h1 { color: #007bff; }
+        h2 { color: #555; margin-top: 25px; }
+        ul { list-style-type: none; padding: 0; }
+        li { margin-bottom: 10px; }
+        a { color: #007bff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        button { background-color: #dc3545; color: white; padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; font-size: 1em; }
+        button:hover { background-color: #c82333; }
+        pre { background-color: #eee; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 10px; }
+        .logout-btn { margin-top: 30px; }
+    </style>
+    <script>
+        async function fetchData(endpoint, method = 'GET', body = null) {
+            try {
+                const options = { method: method };
+                if (body) {
+                    options.headers = { 'Content-Type': 'application/json' };
+                    options.body = JSON.stringify(body);
+                }
+                const response = await fetch(`/api/fyers/${endpoint}`, options);
+                const data = await response.json();
+                document.getElementById('response').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('response').innerText = `Error: ${error.message}`;
+                console.error('Fetch error:', error);
+            }
+        }
+
+        async function logout() {
+            await fetchData('logout');
+            window.location.href = '/'; // Redirect to home page after logout
+        }
+
+        // Example for fetching history (requires POST and body)
+        async function fetchHistory() {
+            const symbol = "NSE:SBIN-EQ"; // Example symbol
+            const resolution = "15"; // Example resolution (1, 3, 5, 10, 15, 30, 60, 240, 480, 720, 1D, 1W, 1M)
+            const today = new Date();
+            const twoWeeksAgo = new Date(today.getTime() - (14 * 24 * 60 * 60 * 1000));
+            
+            const range_from = Math.floor(twoWeeksAgo.getTime() / 1000); // Unix timestamp
+            const range_to = Math.floor(today.getTime() / 1000); // Unix timestamp
+
+            const body = {
+                "symbol": symbol,
+                "resolution": resolution,
+                "date_format": "0",
+                "range_from": range_from,
+                "range_to": range_to,
+                "cont_flag": "1"
+            };
+            await fetchData('history', 'POST', body);
+        }
+
+        // Example for placing an order (requires POST and body)
+        async function placeOrder() {
+            const orderBody = {
+                "symbol":"NSE:SBIN-EQ",
+                "qty":1,
+                "type":2, // Limit Order
+                "side":1, # Buy
+                "productType":"CNC",
+                "limitPrice":600,
+                "stopPrice":0,
+                "validity":"DAY",
+                "disclosedQty":0,
+                "
