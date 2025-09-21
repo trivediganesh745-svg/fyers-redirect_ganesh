@@ -3,7 +3,8 @@ from flask import Flask, request, jsonify, redirect, url_for
 from fyers_apiv3 import fyersModel
 from dotenv import load_dotenv
 from flask_cors import CORS
-import google.generativeai as genai # Import Gemini library
+import google.generativeai as genai
+import json # Ensure json is imported
 
 # Load environment variables
 load_dotenv()
@@ -17,8 +18,13 @@ SECRET_KEY = os.environ.get("FYERS_SECRET_KEY")
 REDIRECT_URI = os.environ.get("FYERS_REDIRECT_URI")
 ACCESS_TOKEN = os.environ.get("FYERS_ACCESS_TOKEN")
 
+# Frontend URL - **IMPORTANT: ADD THIS ENVIRONMENT VARIABLE**
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8000") # Default for local testing
+
 if not all([CLIENT_ID, SECRET_KEY, REDIRECT_URI]):
     print("WARNING: Fyers API credentials are not fully set. Some functionalities may not work.")
+if not GOOGLE_API_KEY:
+    print("WARNING: GOOGLE_API_KEY is not set. Gemini API functionality will not work.")
 
 # Initialize FyersModel (global)
 fyers = None
@@ -35,13 +41,12 @@ initialize_fyers_model(ACCESS_TOKEN)
 
 # --- Gemini API Configuration ---
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-if not GOOGLE_API_KEY:
-    print("WARNING: GOOGLE_API_KEY is not set. Gemini API functionality will not work.")
-else:
+if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-pro') # You can choose other models if needed
+    gemini_model = genai.GenerativeModel('gemini-pro')
 
-# --- Fyers Authentication Flow Endpoints (Keep as is) ---
+# --- Fyers Authentication Flow Endpoints ---
+
 @app.route('/fyers-login')
 def fyers_login():
     """
@@ -73,9 +78,11 @@ def fyers_auth_callback():
     error = request.args.get('error')
 
     if error:
-        return jsonify({"error": f"Fyers authentication failed: {error}"}), 400
+        # Redirect to frontend with error
+        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error={error}")
     if not auth_code:
-        return jsonify({"error": "No auth_code received from Fyers."}), 400
+        # Redirect to frontend with error
+        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error=no_auth_code")
 
     session = fyersModel.SessionModel(
         client_id=CLIENT_ID,
@@ -93,16 +100,16 @@ def fyers_auth_callback():
         ACCESS_TOKEN = new_access_token
         initialize_fyers_model(ACCESS_TOKEN)
         
-        # You might want to return the access_token to the frontend here securely
-        # For a simple demo, we just acknowledge. For production, consider HTTP-only cookies or similar.
-        return jsonify({"message": "Fyers token generated successfully!", "access_token_available": True, "access_token": new_access_token})
+        # Redirect to frontend with success status
+        return redirect(f"{FRONTEND_URL}?fyers_auth_status=success")
         
     except Exception as e:
         print(f"Error generating Fyers access token: {e} - Response: {response}")
-        return jsonify({"error": f"Failed to generate Fyers access token: {str(e)}"}), 500
+        # Redirect to frontend with error
+        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error={str(e)}")
 
-# --- Fyers Data Endpoints (Keep as is, or modify as needed) ---
 
+# --- Fyers Data Endpoints (no changes needed for these) ---
 @app.route('/api/fyers/profile')
 def get_profile():
     if not fyers:
@@ -162,7 +169,7 @@ def place_single_order():
         return jsonify({"error": f"Failed to place order: {str(e)}"}), 500
 
 
-# --- New Gemini AI Analysis Endpoint ---
+# --- New Gemini AI Analysis Endpoint (no changes needed) ---
 @app.route('/api/gemini/analyze', methods=['POST'])
 def gemini_analyze():
     if not GOOGLE_API_KEY:
@@ -176,8 +183,6 @@ def gemini_analyze():
         if not market_data or not analysis_logic:
             return jsonify({"error": "Missing 'market_data' or 'analysis_logic' in request."}), 400
 
-        # Construct the prompt for Gemini
-        # It's crucial to explicitly ask for JSON output
         prompt = f"""
         Analyze the following market data based on the provided scalping logic.
         The market data represents historical candles. Each candle is in the format:
@@ -199,29 +204,21 @@ def gemini_analyze():
         {{
             "symbol": "NSE:NIFTY50-INDEX", // Replace with the actual symbol from market_data
             "action": "BUY" | "SELL" | "HOLD",
-            "entry_price": "APPROXIMATE_ENTRY_PRICE", // e.g., 130.00
-            "stop_loss": "APPROXIMATE_STOP_LOSS_PRICE", // e.g., 115.00
-            "target_price": "APPROXIMATE_TARGET_PRICE", // e.g., 275.00
+            "entry_price": 0.0, // e.g., 130.00
+            "stop_loss": 0.0, // e.g., 115.00
+            "target_price": 0.0, // e.g., 275.00
             "reasoning": "BRIEF_EXPLANATION_FOR_THE_SIGNAL" // Max 2-3 sentences
         }}
         
-        If no clear opportunity is found based on the logic, set "action": "HOLD" and provide a reason.
+        If no clear opportunity is found, set "action": "HOLD" and provide a reason.
         Ensure the prices are realistic based on the provided market data.
         """
         
-        # Make the call to Gemini API
         response = gemini_model.generate_content(prompt)
-        
-        # Extract the JSON from Gemini's response
-        # Gemini might return text that needs parsing to JSON
         gemini_text_response = response.text
         
         try:
-            # Attempt to parse the text as JSON
-            import json
             signal = json.loads(gemini_text_response)
-            
-            # Basic validation of the signal structure
             required_keys = ["symbol", "action", "entry_price", "stop_loss", "target_price", "reasoning"]
             if not all(key in signal for key in required_keys):
                 raise ValueError("Gemini response is not in the expected JSON format.")
@@ -238,8 +235,11 @@ def gemini_analyze():
         print(f"Error calling Gemini API: {e}")
         return jsonify({"error": f"Failed to perform AI analysis: {str(e)}"}), 500
 
+
 @app.route('/')
 def home():
+    # This route is mainly for a quick check that the proxy is running.
+    # The frontend will be loaded from its own URL.
     return "Fyers API Proxy Server is running! Access the frontend to use it."
 
 if __name__ == '__main__':
