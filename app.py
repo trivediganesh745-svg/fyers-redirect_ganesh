@@ -1,10 +1,11 @@
 import os
-from flask import Flask, request, jsonify, redirect, url_for
+from flask import Flask, request, jsonify, redirect, url_for, render_template_string
 from fyers_apiv3 import fyersModel
 from dotenv import load_dotenv
 from flask_cors import CORS
 import google.generativeai as genai
 import json # Ensure json is imported
+import time # For session management in a simple way
 
 # Load environment variables
 load_dotenv()
@@ -16,15 +17,14 @@ CORS(app)
 CLIENT_ID = os.environ.get("FYERS_CLIENT_ID")
 SECRET_KEY = os.environ.get("FYERS_SECRET_KEY")
 REDIRECT_URI = os.environ.get("FYERS_REDIRECT_URI")
-ACCESS_TOKEN = os.environ.get("FYERS_ACCESS_TOKEN")
+# This ACCESS_TOKEN will now be updated directly by the callback
+ACCESS_TOKEN = None 
 
-# Frontend URL - **IMPORTANT: ADD THIS ENVIRONMENT VARIABLE**
-FRONTEND_URL = os.environ.get(https://github.com/trivediganesh745-svg/fyers-redirect_ganesh) # Default for local testing
+# Frontend URL - No longer directly used for redirect in this setup
+# FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:8000") # Default for local testing
 
 if not all([CLIENT_ID, SECRET_KEY, REDIRECT_URI]):
     print("WARNING: Fyers API credentials are not fully set. Some functionalities may not work.")
-if not GOOGLE_API_KEY:
-    print("WARNING: GOOGLE_API_KEY is not set. Gemini API functionality will not work.")
 
 # Initialize FyersModel (global)
 fyers = None
@@ -37,13 +37,16 @@ def initialize_fyers_model(token):
     else:
         print("FyersModel could not be initialized: No access token provided.")
 
-initialize_fyers_model(ACCESS_TOKEN)
+# We no longer initialize fyers at startup, only after successful auth
 
 # --- Gemini API Configuration ---
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
     gemini_model = genai.GenerativeModel('gemini-pro')
+else:
+    print("WARNING: GOOGLE_API_KEY is not set. Gemini API functionality will not work.")
+
 
 # --- Fyers Authentication Flow Endpoints ---
 
@@ -72,17 +75,37 @@ def fyers_auth_callback():
     """
     Callback endpoint after the user logs in on Fyers.
     Exchanges the auth_code for an access_token.
+    Instead of redirecting, it displays a message for the user.
     """
     auth_code = request.args.get('auth_code')
     state = request.args.get('state')
     error = request.args.get('error')
 
     if error:
-        # Redirect to frontend with error
-        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error={error}")
+        # Just return an HTML message for the user to close the tab
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Fyers Login Failed</title></head>
+            <body>
+                <h1>Fyers Login Failed</h1>
+                <p>Error: {{ error_message }}</p>
+                <p>Please close this tab and return to Google AI Studio.</p>
+            </body>
+            </html>
+        """, error_message=error)
     if not auth_code:
-        # Redirect to frontend with error
-        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error=no_auth_code")
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Fyers Login Failed</title></head>
+            <body>
+                <h1>Fyers Login Failed</h1>
+                <p>No authorization code received.</p>
+                <p>Please close this tab and return to Google AI Studio.</p>
+            </body>
+            </html>
+        """)
 
     session = fyersModel.SessionModel(
         client_id=CLIENT_ID,
@@ -98,18 +121,57 @@ def fyers_auth_callback():
         new_access_token = response["access_token"]
         global ACCESS_TOKEN
         ACCESS_TOKEN = new_access_token
-        initialize_fyers_model(ACCESS_TOKEN)
+        initialize_fyers_model(ACCESS_TOKEN) # Initialize FyersModel here
         
-        # Redirect to frontend with success status
-        return redirect(f"{FRONTEND_URL}?fyers_auth_status=success")
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Fyers Login Successful</title></head>
+            <body>
+                <h1>Fyers Login Successful!</h1>
+                <p>You can now close this tab and return to Google AI Studio.</p>
+                <p>The Fyers API connection is active on the backend.</p>
+            </body>
+            </html>
+        """)
         
     except Exception as e:
         print(f"Error generating Fyers access token: {e} - Response: {response}")
-        # Redirect to frontend with error
-        return redirect(f"{FRONTEND_URL}?fyers_auth_status=failed&error={str(e)}")
+        return render_template_string("""
+            <!DOCTYPE html>
+            <html>
+            <head><title>Fyers Login Failed</title></head>
+            <body>
+                <h1>Fyers Login Failed</h1>
+                <p>An error occurred: {{ error_message }}</p>
+                <p>Please close this tab and return to Google AI Studio.</p>
+            </body>
+            </html>
+        """, error_message=str(e))
 
+# --- NEW: Fyers Status Check Endpoint ---
+@app.route('/api/fyers/status')
+def get_fyers_status():
+    """
+    Returns the current Fyers connection status.
+    The AI Studio frontend will poll this.
+    """
+    if ACCESS_TOKEN:
+        try:
+            # Optionally, make a quick API call to verify the token is still good
+            # e.g., fyers.get_profile() - but be careful with rate limits if polling too aggressively
+            return jsonify({"status": "connected", "message": "Fyers API is connected."})
+        except Exception as e:
+            # Token might have expired or become invalid
+            global ACCESS_TOKEN
+            ACCESS_TOKEN = None
+            fyers = None # Clear FyersModel
+            return jsonify({"status": "disconnected", "message": f"Fyers token invalid: {str(e)}."}), 401
+    else:
+        return jsonify({"status": "disconnected", "message": "Fyers API is not connected. Please login."}), 401
 
-# --- Fyers Data Endpoints (no changes needed for these) ---
+# --- Fyers Data Endpoints (already adapted to use global fyers object) ---
+# ... (Keep existing /api/fyers/profile, /api/fyers/funds, etc., as they are) ...
 @app.route('/api/fyers/profile')
 def get_profile():
     if not fyers:
@@ -118,7 +180,12 @@ def get_profile():
         profile_data = fyers.get_profile()
         return jsonify(profile_data)
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch profile: {str(e)}"}), 500
+        # Handle cases where token might have become invalid during a data fetch
+        global ACCESS_TOKEN
+        ACCESS_TOKEN = None
+        global fyers
+        fyers = None
+        return jsonify({"error": f"Failed to fetch profile (token might be invalid/expired): {str(e)}"}), 401
 
 @app.route('/api/fyers/funds')
 def get_funds():
@@ -128,7 +195,11 @@ def get_funds():
         funds_data = fyers.funds()
         return jsonify(funds_data)
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch funds: {str(e)}"}), 500
+        global ACCESS_TOKEN
+        ACCESS_TOKEN = None
+        global fyers
+        fyers = None
+        return jsonify({"error": f"Failed to fetch funds (token might be invalid/expired): {str(e)}"}), 401
 
 @app.route('/api/fyers/holdings')
 def get_holdings():
@@ -138,7 +209,11 @@ def get_holdings():
         holdings_data = fyers.holdings()
         return jsonify(holdings_data)
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch holdings: {str(e)}"}), 500
+        global ACCESS_TOKEN
+        ACCESS_TOKEN = None
+        global fyers
+        fyers = None
+        return jsonify({"error": f"Failed to fetch holdings (token might be invalid/expired): {str(e)}"}), 401
 
 @app.route('/api/fyers/history', methods=['POST'])
 def get_history():
@@ -152,7 +227,11 @@ def get_history():
         history_data = fyers.history(data)
         return jsonify(history_data)
     except Exception as e:
-        return jsonify({"error": f"Failed to fetch history: {str(e)}"}), 500
+        global ACCESS_TOKEN
+        ACCESS_TOKEN = None
+        global fyers
+        fyers = None
+        return jsonify({"error": f"Failed to fetch history (token might be invalid/expired): {str(e)}"}), 401
 
 @app.route('/api/fyers/place_order', methods=['POST'])
 def place_single_order():
@@ -166,10 +245,14 @@ def place_single_order():
         response = fyers.place_order(order_data)
         return jsonify(response)
     except Exception as e:
-        return jsonify({"error": f"Failed to place order: {str(e)}"}), 500
-
+        global ACCESS_TOKEN
+        ACCESS_TOKEN = None
+        global fyers
+        fyers = None
+        return jsonify({"error": f"Failed to place order (token might be invalid/expired): {str(e)}"}), 401
 
 # --- New Gemini AI Analysis Endpoint (no changes needed) ---
+# ... (Keep existing /api/gemini/analyze as is) ...
 @app.route('/api/gemini/analyze', methods=['POST'])
 def gemini_analyze():
     if not GOOGLE_API_KEY:
@@ -238,9 +321,7 @@ def gemini_analyze():
 
 @app.route('/')
 def home():
-    # This route is mainly for a quick check that the proxy is running.
-    # The frontend will be loaded from its own URL.
-    return "Fyers API Proxy Server is running! Access the frontend to use it."
+    return "Fyers API Proxy Server is running! Please use Google AI Studio to interact."
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
