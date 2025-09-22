@@ -1,7 +1,5 @@
-Flask
-fyers_apiv3
+fyers-apiv3
+requests
 python-dotenv
-gunicorn
-Flask-Cors
+flask # If you want to build a simple REST API for your frontend to call
 google-generativeai # Add this for Gemini
-setuptools
